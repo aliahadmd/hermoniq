@@ -1,90 +1,166 @@
-# React + Vite + Hono + Cloudflare Workers
+# Harmoniq Backend
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/templates/tree/main/vite-react-template)
+Cloudflare Workers backend for Harmoniq. This project contains the Hono API, Better Auth integration, Drizzle/D1 schema, admin dashboard, AI assistant, and backend tests.
 
-This template provides a minimal setup for building a React application with TypeScript and Vite, designed to run on Cloudflare Workers. It features hot module replacement, ESLint integration, and the flexibility of Workers deployments.
+Run commands from this directory. The mobile app is a separate project in `../app`.
 
-![React + TypeScript + Vite + Cloudflare Workers](https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/fc7b4b62-442b-4769-641b-ad4422d74300/public)
+## Stack
 
-<!-- dash-content-start -->
+- Cloudflare Workers with Wrangler.
+- Hono for API routing and middleware.
+- D1 SQLite with Drizzle ORM and SQL migrations.
+- Better Auth for authentication.
+- React 19, Vite, TanStack Router, and Tailwind for the admin dashboard.
+- Workers AI, Durable Objects, Vectorize, R2, and optional AutoRAG for the AI assistant.
+- Vitest, better-sqlite3, and fast-check for tests.
 
-🚀 Supercharge your web development with this powerful stack:
+## Project Structure
 
-- [**React**](https://react.dev/) - A modern UI library for building interactive interfaces
-- [**Vite**](https://vite.dev/) - Lightning-fast build tooling and development server
-- [**Hono**](https://hono.dev/) - Ultralight, modern backend framework
-- [**Cloudflare Workers**](https://developers.cloudflare.com/workers/) - Edge computing platform for global deployment
-
-### ✨ Key Features
-
-- 🔥 Hot Module Replacement (HMR) for rapid development
-- 📦 TypeScript support out of the box
-- 🛠️ ESLint configuration included
-- ⚡ Zero-config deployment to Cloudflare's global network
-- 🎯 API routes with Hono's elegant routing
-- 🔄 Full-stack development setup
-- 🔎 Built-in Observability to monitor your Worker
-
-Get started in minutes with local development or deploy directly via the Cloudflare dashboard. Perfect for building modern, performant web applications at the edge.
-
-<!-- dash-content-end -->
-
-## Getting Started
-
-To start a new project with this template, run:
-
-```bash
-npm create cloudflare@latest -- --template=cloudflare/templates/vite-react-template
+```text
+src/
+  worker/
+    index.ts              Worker entrypoint and route mounting
+    middleware/           Auth, admin, and error middleware
+    routes/               API route modules
+    ai/                   AI context, prompt, planner, memory, vision
+    agents/               Durable Object chat session agent
+    utils/                Shared Worker utilities
+  db/
+    schema.ts             Drizzle schema
+    migrations/           SQL migrations
+  auth/                   Better Auth and email helpers
+  react-app/              Admin dashboard SPA
+  __tests__/              Vitest tests and helpers
 ```
 
-A live deployment of this template is available at:
-[https://react-vite-template.templates.workers.dev](https://react-vite-template.templates.workers.dev)
-
-## Development
-
-Install dependencies:
+## Commands
 
 ```bash
 npm install
+npm run dev        # Start local Worker + admin dashboard
+npm run build      # Type-check and build Worker/admin assets
+npm run test       # Run all backend tests
+npm run lint       # Run ESLint
+npm run check      # Type-check, build, and Wrangler dry-run deploy
+npm run cf-typegen # Regenerate worker-configuration.d.ts
+npm run deploy     # Deploy to Cloudflare
 ```
 
-Start the development server with:
+Run one test file:
+
+```bash
+npx vitest --run src/__tests__/accounts.test.ts
+```
+
+Run tests by name:
+
+```bash
+npx vitest --run -t "Account round-trip"
+```
+
+## Local Development
+
+Start the backend:
 
 ```bash
 npm run dev
 ```
 
-Your application will be available at [http://localhost:5173](http://localhost:5173).
+The dev server normally runs at:
 
-## Production
-
-Build your project for production:
-
-```bash
-npm run build
+```text
+http://localhost:5173
 ```
 
-Preview your build locally:
+The API is mounted under `/api/*`. The admin dashboard is served by the same Vite/Worker development server.
 
-```bash
-npm run preview
+## Configuration
+
+Cloudflare bindings are configured in `wrangler.json`:
+
+- `DB`: D1 database.
+- `AI`: Workers AI binding.
+- `AI_CHAT_SESSION`: Durable Object namespace for chat sessions.
+- `CHAT_MEMORY_INDEX`: Vectorize index for chat memory.
+- `AI_CHAT_MEDIA_BUCKET`: R2 bucket for AI chat attachments.
+
+Important vars:
+
+```text
+AI_CHAT_MODEL=@cf/google/gemma-4-26b-a4b-it
+AI_VISION_MODEL=@cf/llava-hf/llava-1.5-7b-hf
+AI_EMBED_MODEL=@cf/baai/bge-base-en-v1.5
+AI_SEARCH_ENABLED=false
+AI_SEARCH_INSTANCE=
 ```
 
-Deploy your project to Cloudflare Workers:
+Secrets should be stored with Wrangler, not committed:
 
 ```bash
-npm run build && npm run deploy
+npx wrangler secret put RESEND_API_KEY
+npx wrangler secret put EMAIL_FROM
 ```
 
-Monitor your workers:
+After changing `wrangler.json`, regenerate types:
 
 ```bash
-npx wrangler tail
+npm run cf-typegen
 ```
 
-## Additional Resources
+## API Areas
 
-- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
-- [Vite Documentation](https://vitejs.dev/guide/)
-- [React Documentation](https://reactjs.org/)
-- [Hono Documentation](https://hono.dev/)
+- `/api/auth/*`: Better Auth endpoints.
+- `/api/accounts/*`: Money accounts.
+- `/api/categories/*`: Transaction categories.
+- `/api/transactions/*`: Income and expense records.
+- `/api/budgets/*`: Monthly budgets.
+- `/api/dashboard/*`: Money dashboard summaries.
+- `/api/habits/*`: Habits, logs, preferences, and insights.
+- `/api/notes/*`: Notes and note categories.
+- `/api/events/*`: Planner events and ICS import.
+- `/api/ai/*`: AI chats, messages, attachments, search, and pending actions.
+- `/api/admin/users/*`: Admin-only user management.
+
+## AI Assistant
+
+The AI assistant uses a Durable Object per user/chat to keep message history and vector references. It builds a user-scoped ecosystem context from profile, money, habit, note, and event data.
+
+Key files:
+
+- `src/worker/agents/ai-chat-session-agent.ts`: Chat session Durable Object.
+- `src/worker/ai/context.ts`: Personal ecosystem context snapshot.
+- `src/worker/ai/prompt.ts`: Assistant system prompt and heuristic fallback parser.
+- `src/worker/ai/action-planner.ts`: Structured pending-action planner with Zod validation.
+- `src/worker/ai/action-executor.ts`: Confirmed pending-action execution.
+- `src/worker/ai/vector-memory.ts`: Vectorize memory.
+- `src/worker/ai/vision.ts`: R2 attachment loading and image context.
+
+The assistant can propose one pending action at a time. It never executes create, update, delete, archive, or log operations until the user confirms the pending action.
+
+## Database
+
+Schema lives in `src/db/schema.ts`; migrations live in `src/db/migrations/`.
+
+Generate a migration after schema changes:
+
+```bash
+npx drizzle-kit generate
+```
+
+Apply migrations through the normal Wrangler/D1 workflow for the target environment.
+
+## Testing
+
+Tests use in-memory SQLite through `better-sqlite3` and Hono request helpers. No local HTTP server is required for most tests.
+
+Useful files:
+
+- `src/__tests__/helpers/test-app.ts`: In-memory app/database setup.
+- `src/__tests__/*.test.ts`: Standard tests.
+- `src/__tests__/*.property.test.ts`: fast-check property tests.
+
+## Notes
+
+- Every query for user-owned data must include `userId` ownership scoping.
+- Keep `src/worker/validators.ts` in sync with `../app/lib/validators.ts` when shared request shapes change.
+- `npm run lint` may surface existing test cleanup work; run targeted ESLint on changed files when isolating a feature branch.
