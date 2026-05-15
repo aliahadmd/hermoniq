@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Platform } from 'react-native';
 import type { z } from 'zod';
-import { apiClient, apiFetch } from '@/lib/api-client';
+import { API_BASE_URL, apiClient, apiFetch } from '@/lib/api-client';
+import { authClient } from '@/lib/auth-client';
 import type {
   AiChat,
   AiChatMessagesResponse,
@@ -50,9 +51,9 @@ const EVENTS_KEY = ['events'] as const;
 const EVENT_KEY = ['event'] as const;
 
 export function isAiStreamingSupported(): boolean {
-  if (Platform.OS !== 'web') return false;
-  if (typeof ReadableStream === 'undefined') return false;
   if (typeof TextDecoder === 'undefined') return false;
+  if (Platform.OS !== 'web') return typeof XMLHttpRequest !== 'undefined';
+  if (typeof ReadableStream === 'undefined') return false;
   return true;
 }
 
@@ -85,6 +86,135 @@ function parseSseFrames(
   }
 
   return rest;
+}
+
+function dispatchSseEvent(
+  eventName: string,
+  dataText: string,
+  handlers: StreamHandlers,
+) {
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(dataText) as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+
+  const streamEvent = { type: eventName, ...parsed } as AiStreamEvent;
+
+  switch (streamEvent.type) {
+    case 'start':
+      handlers.onStart?.(streamEvent as AiStreamStartEvent);
+      break;
+    case 'delta':
+      handlers.onDelta?.(String((streamEvent as { text?: unknown }).text ?? ''));
+      break;
+    case 'action':
+      handlers.onAction?.(streamEvent as AiStreamActionEvent);
+      break;
+    case 'done':
+      handlers.onDone?.(streamEvent as AiStreamDoneEvent);
+      break;
+    case 'error':
+      handlers.onError?.(streamEvent as AiStreamErrorEvent);
+      break;
+    default:
+      break;
+  }
+}
+
+function sendAiMessageStreamWithXhr(
+  chatId: string,
+  data: SendAiMessageInput,
+  handlers: StreamHandlers,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (handlers.signal?.aborted) {
+      reject(new Error('Request aborted'));
+      return;
+    }
+
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    let processedLength = 0;
+    let buffer = '';
+
+    const cleanup = () => {
+      handlers.signal?.removeEventListener('abort', handleAbort);
+    };
+
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+
+    const processText = (text: string) => {
+      if (!text) return;
+      buffer += text;
+      buffer = parseSseFrames(buffer, (eventName, dataText) => {
+        dispatchSseEvent(eventName, dataText, handlers);
+      });
+    };
+
+    const handleAbort = () => {
+      xhr.abort();
+      settle(() => reject(new Error('Request aborted')));
+    };
+
+    xhr.open('POST', `${API_BASE_URL}/api/ai/chats/${chatId}/messages/stream`);
+    xhr.setRequestHeader('Accept', 'text/event-stream');
+    xhr.setRequestHeader('Content-Type', 'application/json');
+
+    const cookies = authClient.getCookie();
+    if (cookies) {
+      xhr.setRequestHeader('Cookie', cookies);
+    }
+
+    xhr.onprogress = () => {
+      const responseText = xhr.responseText ?? '';
+      const nextChunk = responseText.slice(processedLength);
+      processedLength = responseText.length;
+      processText(nextChunk);
+    };
+
+    xhr.onload = () => {
+      const responseText = xhr.responseText ?? '';
+      processText(responseText.slice(processedLength));
+
+      if (buffer.trim().length > 0) {
+        buffer = parseSseFrames(`${buffer}\n\n`, (eventName, dataText) => {
+          dispatchSseEvent(eventName, dataText, handlers);
+        });
+      }
+
+      if (xhr.status >= 200 && xhr.status < 300) {
+        settle(resolve);
+        return;
+      }
+
+      let message = `HTTP ${xhr.status}`;
+      try {
+        const parsed = JSON.parse(responseText) as { error?: string };
+        message = parsed.error ?? message;
+      } catch {
+        if (responseText.trim()) message = responseText.trim();
+      }
+      settle(() => reject(new Error(message)));
+    };
+
+    xhr.onerror = () => {
+      settle(() => reject(new Error('Network request failed')));
+    };
+
+    xhr.onabort = () => {
+      settle(() => reject(new Error('Request aborted')));
+    };
+
+    handlers.signal?.addEventListener('abort', handleAbort, { once: true });
+    xhr.send(JSON.stringify(data));
+  });
 }
 
 function invalidateAiQueries(queryClient: ReturnType<typeof useQueryClient>, chatId?: string) {
@@ -284,6 +414,10 @@ export async function sendAiMessageStream(
   data: SendAiMessageInput,
   handlers: StreamHandlers,
 ): Promise<void> {
+  if (Platform.OS !== 'web') {
+    return sendAiMessageStreamWithXhr(chatId, data, handlers);
+  }
+
   const response = await apiFetch(`/api/ai/chats/${chatId}/messages/stream`, {
     method: 'POST',
     headers: {
@@ -312,34 +446,7 @@ export async function sendAiMessageStream(
 
     buffer += decoder.decode(value, { stream: true });
     buffer = parseSseFrames(buffer, (eventName, dataText) => {
-      let parsed: Record<string, unknown> = {};
-      try {
-        parsed = JSON.parse(dataText) as Record<string, unknown>;
-      } catch {
-        parsed = {};
-      }
-
-      const streamEvent = { type: eventName, ...parsed } as AiStreamEvent;
-
-      switch (streamEvent.type) {
-        case 'start':
-          handlers.onStart?.(streamEvent as AiStreamStartEvent);
-          break;
-        case 'delta':
-          handlers.onDelta?.(String((streamEvent as { text?: unknown }).text ?? ''));
-          break;
-        case 'action':
-          handlers.onAction?.(streamEvent as AiStreamActionEvent);
-          break;
-        case 'done':
-          handlers.onDone?.(streamEvent as AiStreamDoneEvent);
-          break;
-        case 'error':
-          handlers.onError?.(streamEvent as AiStreamErrorEvent);
-          break;
-        default:
-          break;
-      }
+      dispatchSseEvent(eventName, dataText, handlers);
     });
   }
 }

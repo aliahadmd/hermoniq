@@ -4,7 +4,7 @@ import { resolveApiBaseUrl } from './base-url';
 
 // Production backend URL — update this after running `wrangler deploy` in backend/
 // To override for local development, set: EXPO_PUBLIC_API_URL=http://localhost:5173
-const BASE_URL = resolveApiBaseUrl(process.env.EXPO_PUBLIC_API_URL);
+export const API_BASE_URL = resolveApiBaseUrl(process.env.EXPO_PUBLIC_API_URL);
 
 interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
@@ -31,7 +31,7 @@ export async function apiFetch(path: string, options: RequestOptions = {}): Prom
     requestHeaders.set('Cookie', cookies);
   }
 
-  return fetch(`${BASE_URL}${path}`, {
+  return fetch(`${API_BASE_URL}${path}`, {
     headers: requestHeaders,
     body: body
       ? (isFormData ? (body as FormData) : JSON.stringify(body))

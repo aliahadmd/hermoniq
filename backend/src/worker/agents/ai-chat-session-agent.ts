@@ -180,15 +180,23 @@ function extractSseTextChunk(data: string): string {
   return "";
 }
 
-function emitWords(
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function emitWords(
   controller: ReadableStreamDefaultController<Uint8Array>,
   encoder: TextEncoder,
   content: string,
+  delayMs = 0,
 ) {
   if (!content.trim()) return;
   const words = content.match(/\S+\s*/g) ?? [content];
   for (const word of words) {
     controller.enqueue(encoder.encode(sseEvent("delta", { text: word })));
+    if (delayMs > 0 && words.length <= 500) {
+      await delay(delayMs);
+    }
   }
 }
 
@@ -391,6 +399,15 @@ export class AiChatSessionAgent extends Agent<Env> {
         ) {
           return response as ReadableStream<Uint8Array>;
         }
+        if (
+          response &&
+          typeof response === "object" &&
+          "body" in response &&
+          (response as { body?: unknown }).body &&
+          typeof (response as { body: ReadableStream<Uint8Array> }).body.getReader === "function"
+        ) {
+          return (response as { body: ReadableStream<Uint8Array> }).body;
+        }
       } catch (error) {
         console.error("AI streaming invocation failed", {
           model,
@@ -576,7 +593,7 @@ export class AiChatSessionAgent extends Agent<Env> {
                     : parsedChunk;
                   if (!delta) continue;
                   assistantText += delta;
-                  emitWords(controller, encoder, delta);
+                  await emitWords(controller, encoder, delta);
                 }
               }
 
@@ -589,7 +606,7 @@ export class AiChatSessionAgent extends Agent<Env> {
                     : parsedChunk;
                   if (delta) {
                     assistantText += delta;
-                    emitWords(controller, encoder, delta);
+                    await emitWords(controller, encoder, delta);
                   }
                 }
               }
@@ -597,7 +614,7 @@ export class AiChatSessionAgent extends Agent<Env> {
 
             if (!assistantText || assistantText.trim().length === 0) {
               assistantText = await this.runChatModel(prompt.messages);
-              emitWords(controller, encoder, assistantText);
+              await emitWords(controller, encoder, assistantText, 8);
             }
 
             assistantText = enforceVisionAnswer(assistantText, vision.chunks);

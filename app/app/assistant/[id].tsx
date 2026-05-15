@@ -62,8 +62,10 @@ function isExplicitActionCommand(input: string): boolean {
 const MAX_ATTACHMENTS = 4;
 
 interface PendingUserDraft {
+  id?: string;
   content: string;
   attachments: AiMessageAttachment[];
+  createdAt: string;
 }
 
 export default function AssistantChatScreen() {
@@ -148,13 +150,30 @@ export default function AssistantChatScreen() {
 
   const renderedMessages = useMemo(() => {
     const next: AiMessage[] = [...messages];
-    if (pendingUserMessage) {
+    const hasPersistedPendingUserMessage = pendingUserMessage
+      ? messages.some((message) => {
+          if (message.role !== 'user') return false;
+          if (pendingUserMessage.id && message.id === pendingUserMessage.id) return true;
+          if (message.content !== pendingUserMessage.content) return false;
+
+          const messageTime = new Date(message.createdAt).getTime();
+          const pendingTime = new Date(pendingUserMessage.createdAt).getTime();
+          if (Number.isFinite(messageTime) && Number.isFinite(pendingTime) && messageTime < pendingTime - 5_000) {
+            return false;
+          }
+
+          const messageAttachmentIds = new Set((message.attachments ?? []).map((attachment) => attachment.id));
+          return pendingUserMessage.attachments.every((attachment) => messageAttachmentIds.has(attachment.id));
+        })
+      : false;
+
+    if (pendingUserMessage && !hasPersistedPendingUserMessage) {
       next.push({
-        id: 'temp-user',
+        id: pendingUserMessage.id ?? 'temp-user',
         role: 'user',
         content: pendingUserMessage.content,
         attachments: pendingUserMessage.attachments,
-        createdAt: new Date().toISOString(),
+        createdAt: pendingUserMessage.createdAt,
       });
     }
     if (draftAssistant) {
@@ -339,6 +358,7 @@ export default function AssistantChatScreen() {
     setPendingUserMessage({
       content: textValue,
       attachments: sendingAttachments,
+      createdAt: new Date().toISOString(),
     });
     setComposerAttachments([]);
     setDraftAssistant('');
@@ -384,8 +404,15 @@ export default function AssistantChatScreen() {
         },
         {
           signal: abortController.signal,
-          onStart: () => {
+          onStart: (event) => {
             sawStreamStart = true;
+            setPendingUserMessage((current) => current
+              ? {
+                  ...current,
+                  id: event.userMessage.id,
+                  createdAt: event.userMessage.createdAt,
+                }
+              : current);
           },
           onDelta: (chunk) => {
             setDraftAssistant((prev) => `${prev}${chunk}`);
