@@ -1,6 +1,5 @@
 import { createAuthClient } from "better-auth/react";
 import { expoClient } from "@better-auth/expo/client";
-import { emailOTPClient } from "better-auth/client/plugins";
 import * as SecureStore from "expo-secure-store";
 import { resolveApiBaseUrl } from "./base-url";
 
@@ -14,8 +13,7 @@ export const authClient = createAuthClient({
       storagePrefix: "harmoniq-auth",
       storage: SecureStore,
     }),
-    emailOTPClient(),
   ],
 });
 
-export const { signIn, signUp, signOut, useSession, emailOtp } = authClient;
+export const { signIn, signUp, signOut, useSession } = authClient;

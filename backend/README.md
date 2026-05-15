@@ -42,6 +42,7 @@ npm run build      # Type-check and build Worker/admin assets
 npm run test       # Run all backend tests
 npm run lint       # Run ESLint
 npm run check      # Type-check, build, and Wrangler dry-run deploy
+npm run seed       # Seed local demo/portfolio data
 npm run cf-typegen # Regenerate worker-configuration.d.ts
 npm run deploy     # Deploy to Cloudflare
 ```
@@ -94,17 +95,46 @@ AI_SEARCH_ENABLED=false
 AI_SEARCH_INSTANCE=
 ```
 
-Secrets should be stored with Wrangler, not committed:
-
-```bash
-npx wrangler secret put RESEND_API_KEY
-npx wrangler secret put EMAIL_FROM
-```
+Email verification is intentionally disabled for portfolio/demo use. Sign-up creates a usable local account immediately.
 
 After changing `wrangler.json`, regenerate types:
 
 ```bash
 npm run cf-typegen
+```
+
+## Demo Seed
+
+Use the seed script to populate a local portfolio dataset:
+
+```bash
+npx wrangler d1 migrations apply harmoniq-db --local
+npm run dev
+npm run seed
+```
+
+The seed script is idempotent and adds:
+
+- Demo admin account and profile.
+- Money categories, accounts, transactions, and monthly budgets.
+- Habit preferences, habits, and recent logs.
+- Note categories, pinned notes, active notes, and an archived note.
+- Planner events for upcoming portfolio/demo workflows.
+- AI chat presets with all context chips enabled.
+
+Default login:
+
+```text
+admin@example.com / admin@123
+```
+
+Override defaults when needed:
+
+```bash
+SEED_ADMIN_EMAIL=demo@example.com \
+SEED_ADMIN_PASSWORD='change-me' \
+SEED_BASE_URL=http://localhost:5173 \
+npm run seed
 ```
 
 ## API Areas

@@ -16,8 +16,6 @@ declare namespace Cloudflare {
 		AI_EMBED_MODEL: "@cf/baai/bge-base-en-v1.5";
 		AI_SEARCH_ENABLED: "false";
 		AI_SEARCH_INSTANCE: "";
-		RESEND_API_KEY: string;
-		EMAIL_FROM: string;
 		AI_CHAT_SESSION: DurableObjectNamespace<import("./src/worker/index").AiChatSessionAgent>;
 	}
 }
@@ -26,7 +24,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "AI_CHAT_MODEL" | "AI_VISION_MODEL" | "AI_EMBED_MODEL" | "AI_SEARCH_ENABLED" | "AI_SEARCH_INSTANCE" | "RESEND_API_KEY" | "EMAIL_FROM">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "AI_CHAT_MODEL" | "AI_VISION_MODEL" | "AI_EMBED_MODEL" | "AI_SEARCH_ENABLED" | "AI_SEARCH_INSTANCE">> {}
 }
 
 // Begin runtime types

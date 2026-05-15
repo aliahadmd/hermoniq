@@ -364,8 +364,6 @@ function createAiApp() {
     AI_EMBED_MODEL: "@cf/baai/bge-base-en-v1.5",
     AI_SEARCH_ENABLED: "false",
     AI_SEARCH_INSTANCE: "",
-    RESEND_API_KEY: "test",
-    EMAIL_FROM: "test@example.com",
   };
 
   const app = new Hono<AppEnv>();

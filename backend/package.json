@@ -58,6 +58,7 @@
 		"dev": "vite",
 		"lint": "eslint .",
 		"preview": "npm run build && vite preview",
+		"seed": "tsc scripts/seed.ts --outDir .wrangler/seed-build --module NodeNext --moduleResolution NodeNext --target ES2022 --types node --skipLibCheck && node .wrangler/seed-build/seed.js",
 		"test": "vitest --run"
 	},
 	"type": "module"

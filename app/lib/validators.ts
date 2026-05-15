@@ -394,14 +394,5 @@ export const registerSchema = z
     path: ['confirmPassword'],
   });
 
-export const verifyEmailSchema = z.object({
-  otp: z
-    .string()
-    .min(1, 'Verification code is required')
-    .max(6, 'Code must be at most 6 digits')
-    .regex(/^\d+$/, 'Code must contain only digits'),
-});
-
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
-export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;

@@ -9,6 +9,9 @@
  * - Monthly budgets (account+category)
  * - Habit preferences
  * - Habits + habit logs
+ * - Notes + note categories
+ * - Planner events
+ * - AI chat presets
  *
  * Prerequisites:
  * 1. Apply latest migrations locally:
@@ -17,7 +20,7 @@
  *    npm run dev
  *
  * Run:
- *    npx tsx scripts/seed.ts
+ *    npm run seed
  */
 
 const BASE = process.env.SEED_BASE_URL ?? "http://localhost:5173";
@@ -28,10 +31,11 @@ const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@example.com";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "admin@123";
 const ADMIN_NAME = process.env.SEED_ADMIN_NAME ?? "Admin";
 const ADMIN_USERNAME = process.env.SEED_ADMIN_USERNAME ?? "admin_seed";
+const args = new Set(process.argv.slice(2));
 
 let sessionCookie = "";
 
-type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type HabitType = "yes_no" | "measurable";
 type HabitFrequencyType = "daily" | "weekdays";
 type HabitListFilter = "all" | "due_today" | "completed_today";
@@ -103,6 +107,32 @@ interface Habit {
   archivedAt: string | null;
 }
 
+interface NoteCategory {
+  id: string;
+  name: string;
+}
+
+interface Note {
+  id: string;
+  title: string;
+  isPinned: boolean;
+  archivedAt: string | null;
+  categoryId: string | null;
+}
+
+interface EventItem {
+  id: string;
+  title: string;
+  startAt: string;
+  endAt: string;
+}
+
+interface AiChat {
+  id: string;
+  title: string;
+  pinned: boolean;
+}
+
 interface SeedTransactionDef {
   amount: number;
   type: "income" | "expense";
@@ -139,6 +169,31 @@ interface SeedHabitDef {
   notes: string;
   startDate: string;
   logs: SeedHabitLogDef[];
+}
+
+interface SeedNoteDef {
+  title: string;
+  content: string;
+  categoryName: string;
+  pinned?: boolean;
+  archived?: boolean;
+}
+
+interface SeedEventDef {
+  title: string;
+  description: string;
+  location: string;
+  timezone: string;
+  isAllDay: boolean;
+  startAt: string;
+  endAt: string;
+  reminderMinutes: 0 | 5 | 10 | 15 | 10080 | null;
+}
+
+interface SeedAiChatDef {
+  title: string;
+  customInstruction: string;
+  pinned?: boolean;
 }
 
 function parseJsonMaybe(text: string): unknown {
@@ -230,6 +285,11 @@ async function apiPut<T>(path: string, body: unknown, allowStatuses = [200]): Pr
   return result.data;
 }
 
+async function apiPatch<T>(path: string, body: unknown, allowStatuses = [200]): Promise<T> {
+  const result = await request<T>(path, { method: "PATCH", body, allowStatuses });
+  return result.data;
+}
+
 async function authPost<T>(
   path: string,
   body: unknown,
@@ -244,16 +304,16 @@ function sqlEscape(value: string): string {
 
 async function patchAdminUserInDb() {
   const { execSync } = await import("node:child_process");
-  const sql = `UPDATE user SET emailVerified = 1, role = 'admin', banned = 0 WHERE email = '${sqlEscape(ADMIN_EMAIL)}'`;
+  const sql = `UPDATE user SET role = 'admin', banned = 0 WHERE email = '${sqlEscape(ADMIN_EMAIL)}'`;
   const command = `npx wrangler d1 execute ${DB_NAME} --local --command="${sql.replace(/"/g, '\\"')}"`;
   execSync(command, { cwd: process.cwd(), stdio: "pipe" });
 }
 
-function isoDateForMonthOffset(monthOffset: number, day: number): string {
+function dateOnlyForMonthOffset(monthOffset: number, day: number): string {
   const now = new Date();
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + monthOffset, day, 12, 0, 0, 0),
-  ).toISOString();
+  ).toISOString().slice(0, 10);
 }
 
 function dateOnlyDaysAgo(daysAgo: number): string {
@@ -264,6 +324,19 @@ function dateOnlyDaysAgo(daysAgo: number): string {
 
 function monthKeyNow(): string {
   return new Date().toISOString().slice(0, 7);
+}
+
+function addDays(date: Date, days: number): Date {
+  const copy = new Date(date);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy;
+}
+
+function isoAtDaysFromNow(daysFromNow: number, hourUtc: number, minuteUtc = 0): string {
+  const base = addDays(new Date(), daysFromNow);
+  return new Date(
+    Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate(), hourUtc, minuteUtc, 0, 0),
+  ).toISOString();
 }
 
 function weekdayFromDateOnly(date: string): number {
@@ -345,18 +418,18 @@ async function ensureTransactions(
   accountsByName: Map<string, Account>,
 ) {
   const defs: SeedTransactionDef[] = [
-    { amount: 8500000, type: "income", date: isoDateForMonthOffset(0, 1), description: "[seed] Salary (BDT)", categoryTitle: "Salary", accountName: "BRAC Bank" },
-    { amount: 2500000, type: "expense", date: isoDateForMonthOffset(0, 3), description: "[seed] Rent payment", categoryTitle: "Rent", accountName: "BRAC Bank" },
-    { amount: 65000, type: "expense", date: isoDateForMonthOffset(0, 5), description: "[seed] Grocery run", categoryTitle: "Food", accountName: "Cash Wallet" },
-    { amount: 140000, type: "expense", date: isoDateForMonthOffset(0, 7), description: "[seed] Daily commute", categoryTitle: "Transport", accountName: "Cash Wallet" },
-    { amount: 240000, type: "expense", date: isoDateForMonthOffset(0, 10), description: "[seed] Earbuds purchase", categoryTitle: "Shopping", accountName: "BRAC Bank" },
-    { amount: 230000, type: "income", date: isoDateForMonthOffset(0, 2), description: "[seed] Freelance payout (USD)", categoryTitle: "Freelance", accountName: "Wise USD" },
-    { amount: 4999, type: "expense", date: isoDateForMonthOffset(0, 8), description: "[seed] Streaming subscription", categoryTitle: "Shopping", accountName: "Wise USD" },
-    { amount: 800000, type: "income", date: isoDateForMonthOffset(0, 1), description: "[seed] RMB stipend", categoryTitle: "Salary", accountName: "WeChat Pay" },
-    { amount: 22000, type: "expense", date: isoDateForMonthOffset(0, 4), description: "[seed] Noodles and tea", categoryTitle: "Food", accountName: "WeChat Pay" },
-    { amount: 54000, type: "expense", date: isoDateForMonthOffset(0, 9), description: "[seed] City travel", categoryTitle: "Transport", accountName: "WeChat Pay" },
-    { amount: 8500000, type: "income", date: isoDateForMonthOffset(-1, 1), description: "[seed] Salary previous month", categoryTitle: "Salary", accountName: "BRAC Bank" },
-    { amount: 2500000, type: "expense", date: isoDateForMonthOffset(-1, 3), description: "[seed] Rent previous month", categoryTitle: "Rent", accountName: "BRAC Bank" },
+    { amount: 8500000, type: "income", date: dateOnlyForMonthOffset(0, 1), description: "[seed] Salary (BDT)", categoryTitle: "Salary", accountName: "BRAC Bank" },
+    { amount: 2500000, type: "expense", date: dateOnlyForMonthOffset(0, 3), description: "[seed] Rent payment", categoryTitle: "Rent", accountName: "BRAC Bank" },
+    { amount: 65000, type: "expense", date: dateOnlyForMonthOffset(0, 5), description: "[seed] Grocery run", categoryTitle: "Food", accountName: "Cash Wallet" },
+    { amount: 140000, type: "expense", date: dateOnlyForMonthOffset(0, 7), description: "[seed] Daily commute", categoryTitle: "Transport", accountName: "Cash Wallet" },
+    { amount: 240000, type: "expense", date: dateOnlyForMonthOffset(0, 10), description: "[seed] Earbuds purchase", categoryTitle: "Shopping", accountName: "BRAC Bank" },
+    { amount: 230000, type: "income", date: dateOnlyForMonthOffset(0, 2), description: "[seed] Freelance payout (USD)", categoryTitle: "Freelance", accountName: "Wise USD" },
+    { amount: 4999, type: "expense", date: dateOnlyForMonthOffset(0, 8), description: "[seed] Streaming subscription", categoryTitle: "Shopping", accountName: "Wise USD" },
+    { amount: 800000, type: "income", date: dateOnlyForMonthOffset(0, 1), description: "[seed] RMB stipend", categoryTitle: "Salary", accountName: "WeChat Pay" },
+    { amount: 22000, type: "expense", date: dateOnlyForMonthOffset(0, 4), description: "[seed] Noodles and tea", categoryTitle: "Food", accountName: "WeChat Pay" },
+    { amount: 54000, type: "expense", date: dateOnlyForMonthOffset(0, 9), description: "[seed] City travel", categoryTitle: "Transport", accountName: "WeChat Pay" },
+    { amount: 8500000, type: "income", date: dateOnlyForMonthOffset(-1, 1), description: "[seed] Salary previous month", categoryTitle: "Salary", accountName: "BRAC Bank" },
+    { amount: 2500000, type: "expense", date: dateOnlyForMonthOffset(-1, 3), description: "[seed] Rent previous month", categoryTitle: "Rent", accountName: "BRAC Bank" },
   ];
 
   const existing = await apiGet<Transaction[]>("/transactions");
@@ -629,7 +702,251 @@ async function ensureHabits() {
   console.log(`✓ Habits ready (+${created} new, ${updated} updated, ${logsUpserted} logs upserted)`);
 }
 
+async function ensureNoteCategories(): Promise<Map<string, NoteCategory>> {
+  const defs = ["Portfolio", "Finance", "Ideas", "Health", "Travel"] as const;
+  const existing = await apiGet<NoteCategory[]>("/notes/categories");
+  const byName = new Map<string, NoteCategory>(existing.map((item) => [item.name, item]));
+  let created = 0;
+
+  for (const name of defs) {
+    if (byName.has(name)) continue;
+    const row = await apiPost<NoteCategory>("/notes/categories", { name }, [201, 409]);
+    byName.set(row.name, row);
+    created += 1;
+  }
+
+  console.log(`✓ Note categories ready (${byName.size} total, +${created} new)`);
+  return byName;
+}
+
+async function ensureNotes(categoriesByName: Map<string, NoteCategory>) {
+  const defs: SeedNoteDef[] = [
+    {
+      title: "[seed] Portfolio story",
+      categoryName: "Portfolio",
+      pinned: true,
+      content: [
+        "Harmoniq demo profile for portfolio walkthroughs.",
+        "",
+        "- Money tracker shows multi-currency balances, budgets, and recent transactions.",
+        "- Habits show streak-like daily data and measurable progress.",
+        "- Planner shows upcoming events and reminders.",
+        "- AI assistant can reason across enabled money, habit, note, and event context.",
+      ].join("\n"),
+    },
+    {
+      title: "[seed] Monthly finance review",
+      categoryName: "Finance",
+      pinned: true,
+      content: [
+        "Review talking points:",
+        "- Salary and freelance income are separated by currency.",
+        "- Food and transport budgets are intentionally active for dashboard screenshots.",
+        "- Use the dashboard to show month-to-date spending and budget pressure.",
+      ].join("\n"),
+    },
+    {
+      title: "[seed] AI assistant prompts",
+      categoryName: "Ideas",
+      content: [
+        "Try these demo prompts:",
+        "1. Summarize my spending and habits this week.",
+        "2. What should I watch before my portfolio review event?",
+        "3. Draft a note from my current budget pressure.",
+        "4. Create a habit for reviewing money every Friday.",
+      ].join("\n"),
+    },
+    {
+      title: "[seed] Wellness goals",
+      categoryName: "Health",
+      content: "Keep gym, reading, and Quran study visible as a balanced lifestyle demo.",
+    },
+    {
+      title: "[seed] Archived launch notes",
+      categoryName: "Portfolio",
+      archived: true,
+      content: "Archived example note for testing the notes archive workflow.",
+    },
+  ];
+
+  const existing = await apiGet<Note[]>("/notes?includeArchived=true");
+  const byTitle = new Map<string, Note>(existing.map((item) => [item.title, item]));
+  let created = 0;
+  let updated = 0;
+
+  for (const def of defs) {
+    const category = categoriesByName.get(def.categoryName);
+    if (!category) throw new Error(`Missing note category: ${def.categoryName}`);
+
+    const existingNote = byTitle.get(def.title);
+    const payload = {
+      title: def.title,
+      content: def.content,
+      categoryId: category.id,
+    };
+
+    const note = existingNote
+      ? await apiPut<Note>(`/notes/${existingNote.id}`, {
+          ...payload,
+          isPinned: Boolean(def.pinned),
+          archivedAt: def.archived ? (existingNote.archivedAt ?? new Date().toISOString()) : null,
+        })
+      : await apiPost<Note>("/notes", payload);
+
+    if (existingNote) {
+      updated += 1;
+    } else {
+      created += 1;
+    }
+
+    if (def.pinned && !note.isPinned) {
+      await apiPatch<Note>(`/notes/${note.id}/pin`, {});
+    }
+    if (def.archived && !note.archivedAt) {
+      await apiPatch<Note>(`/notes/${note.id}/archive`, {});
+    }
+    if (!def.archived && note.archivedAt) {
+      await apiPatch<Note>(`/notes/${note.id}/unarchive`, {});
+    }
+  }
+
+  console.log(`✓ Notes ready (+${created} new, ${updated} updated)`);
+}
+
+async function ensureEvents() {
+  const defs: SeedEventDef[] = [
+    {
+      title: "[seed] Portfolio review call",
+      description: "Walk through Harmoniq's money, habits, notes, planner, and AI assistant flows.",
+      location: "Google Meet",
+      timezone: "Asia/Shanghai",
+      isAllDay: false,
+      startAt: isoAtDaysFromNow(2, 7),
+      endAt: isoAtDaysFromNow(2, 8),
+      reminderMinutes: 15,
+    },
+    {
+      title: "[seed] Budget cleanup session",
+      description: "Review month-to-date expenses and adjust categories before the next demo.",
+      location: "Home office",
+      timezone: "Asia/Shanghai",
+      isAllDay: false,
+      startAt: isoAtDaysFromNow(4, 12),
+      endAt: isoAtDaysFromNow(4, 13),
+      reminderMinutes: 10,
+    },
+    {
+      title: "[seed] Habit reflection",
+      description: "Check gym, reading, and Quran study progress.",
+      location: "",
+      timezone: "Asia/Shanghai",
+      isAllDay: false,
+      startAt: isoAtDaysFromNow(6, 14),
+      endAt: isoAtDaysFromNow(6, 14, 30),
+      reminderMinutes: 5,
+    },
+    {
+      title: "[seed] Demo travel day",
+      description: "All-day planner example for date handling and event list screenshots.",
+      location: "Shanghai",
+      timezone: "Asia/Shanghai",
+      isAllDay: true,
+      startAt: isoAtDaysFromNow(9, 0),
+      endAt: isoAtDaysFromNow(10, 0),
+      reminderMinutes: 10080,
+    },
+  ];
+
+  const from = encodeURIComponent(isoAtDaysFromNow(-7, 0));
+  const to = encodeURIComponent(isoAtDaysFromNow(45, 23, 59));
+  const existing = await apiGet<EventItem[]>(`/events?from=${from}&to=${to}`);
+  const byTitle = new Map<string, EventItem>(existing.map((item) => [item.title, item]));
+  let created = 0;
+  let updated = 0;
+
+  for (const def of defs) {
+    const existingEvent = byTitle.get(def.title);
+    if (existingEvent) {
+      await apiPut<EventItem>(`/events/${existingEvent.id}`, def);
+      updated += 1;
+    } else {
+      const createdEvent = await apiPost<EventItem>("/events", def);
+      byTitle.set(createdEvent.title, createdEvent);
+      created += 1;
+    }
+  }
+
+  console.log(`✓ Planner events ready (+${created} new, ${updated} updated)`);
+}
+
+async function ensureAiChats() {
+  const defs: SeedAiChatDef[] = [
+    {
+      title: "[seed] Portfolio demo copilot",
+      pinned: true,
+      customInstruction: "Help present Harmoniq as a polished portfolio product. Keep answers concise and connect money, habits, notes, and planner context.",
+    },
+    {
+      title: "[seed] Money and habit coach",
+      customInstruction: "Focus on practical weekly guidance using money tracker, budgets, habits, and notes.",
+    },
+  ];
+
+  const existing = await apiGet<AiChat[]>("/ai/chats");
+  const byTitle = new Map<string, AiChat>(existing.map((item) => [item.title, item]));
+  let created = 0;
+  let updated = 0;
+
+  for (const def of defs) {
+    const existingChat = byTitle.get(def.title);
+    const payload = {
+      title: def.title,
+      customInstruction: def.customInstruction,
+      contexts: {
+        money: true,
+        habits: true,
+        notes: true,
+        events: true,
+      },
+    };
+
+    if (existingChat) {
+      await apiPatch<AiChat>(`/ai/chats/${existingChat.id}`, {
+        ...payload,
+        pinned: Boolean(def.pinned),
+      });
+      updated += 1;
+    } else {
+      const createdChat = await apiPost<AiChat>("/ai/chats", payload);
+      if (def.pinned) {
+        await apiPatch<AiChat>(`/ai/chats/${createdChat.id}`, { pinned: true });
+      }
+      created += 1;
+    }
+  }
+
+  console.log(`✓ AI chat presets ready (+${created} new, ${updated} updated)`);
+}
+
 async function seed() {
+  if (args.has("--help") || args.has("-h")) {
+    console.log([
+      "Seed Harmoniq demo data.",
+      "",
+      "Usage:",
+      "  npm run seed",
+      "",
+      "Environment overrides:",
+      "  SEED_BASE_URL=http://localhost:5173",
+      "  SEED_DB_NAME=harmoniq-db",
+      "  SEED_ADMIN_EMAIL=admin@example.com",
+      "  SEED_ADMIN_PASSWORD=admin@123",
+      "  SEED_ADMIN_NAME=Admin",
+      "  SEED_ADMIN_USERNAME=admin_seed",
+    ].join("\n"));
+    return;
+  }
+
   console.log("🌱 Starting full seed...\n");
   console.log(`Base URL: ${BASE}`);
   console.log(`DB Name : ${DB_NAME}\n`);
@@ -645,7 +962,7 @@ async function seed() {
     [200, 201, 409, 422],
   );
 
-  console.log("Patching admin role + email verification in local D1...");
+  console.log("Patching admin role in local D1...");
   try {
     await patchAdminUserInDb();
     console.log("✓ Admin patched");
@@ -682,6 +999,10 @@ async function seed() {
   await ensureBudgets(categoriesByTitle, accountsByName);
   await ensureHabitPreferences();
   await ensureHabits();
+  const noteCategoriesByName = await ensureNoteCategories();
+  await ensureNotes(noteCategoriesByName);
+  await ensureEvents();
+  await ensureAiChats();
 
   console.log("\n🎉 Seed complete");
   console.log(`   Admin login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);

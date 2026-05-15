@@ -8,9 +8,8 @@ import { betterAuth } from "better-auth";
  *
  * Property 4: Login with valid credentials creates a session
  * Property 5: Login with invalid credentials fails
- * Property 11: Unverified email blocks login
  *
- * **Validates: Requirements 6.1, 6.2, 12.2, 12.8**
+ * **Validates: Requirements 6.1, 6.2**
  */
 
 // SQL to create Better Auth tables (from 0001_better_auth.sql migration)
@@ -68,6 +67,14 @@ CREATE TABLE IF NOT EXISTS "verification" (
 `;
 
 type TestAuth = ReturnType<typeof betterAuth>;
+type SessionResponseBody = {
+  user?: {
+    email?: string;
+  };
+  session?: {
+    token?: string;
+  };
+};
 
 /**
  * Initialize an in-memory SQLite database with Better Auth tables.
@@ -87,10 +94,6 @@ function initDatabase(): InstanceType<typeof Database> {
   return sqlite;
 }
 
-/**
- * Create a Better Auth instance with email verification DISABLED.
- * Used for Properties 4 and 5 where we need login to work without email verification.
- */
 function createTestAuth(sqlite: InstanceType<typeof Database>): TestAuth {
   return betterAuth({
     database: sqlite,
@@ -98,33 +101,6 @@ function createTestAuth(sqlite: InstanceType<typeof Database>): TestAuth {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
-    },
-    trustedOrigins: ["http://localhost"],
-    user: {
-      additionalFields: {
-        role: {
-          type: "string",
-          defaultValue: "user",
-          input: false,
-        },
-      },
-    },
-  });
-}
-
-/**
- * Create a Better Auth instance with email verification ENABLED.
- * Used for Property 11 to test that unverified emails are blocked from login.
- */
-function createTestAuthWithEmailVerification(
-  sqlite: InstanceType<typeof Database>
-): TestAuth {
-  return betterAuth({
-    database: sqlite,
-    baseURL: "http://localhost:3000",
-    emailAndPassword: {
-      enabled: true,
-      requireEmailVerification: true,
     },
     trustedOrigins: ["http://localhost"],
     user: {
@@ -196,16 +172,6 @@ const validPasswordArb = fc
   .map(([letters, digits, extra]) => letters + digits + extra)
   .filter((p) => p.length >= 8 && p.length <= 40);
 
-/**
- * Generates a wrong password that is guaranteed to differ from the original.
- * Appends "WRONG" to ensure it's always different.
- */
-function wrongPasswordArb(originalPassword: string) {
-  return validPasswordArb
-    .map((p) => (p === originalPassword ? p + "WRONG" : p))
-    .filter((p) => p !== originalPassword && p.length >= 8);
-}
-
 // --- Test suites ---
 
 /**
@@ -263,7 +229,7 @@ describe("Feature: role-based-auth, Property 4: Login with valid credentials cre
           );
 
           expect(sessionResponse.status).toBe(200);
-          const sessionBody = (await sessionResponse.json()) as any;
+          const sessionBody = (await sessionResponse.json()) as SessionResponseBody;
           expect(sessionBody.user).toBeDefined();
           expect(sessionBody.user.email).toBe(email);
           expect(sessionBody.session).toBeDefined();
@@ -355,74 +321,6 @@ describe("Feature: role-based-auth, Property 5: Login with invalid credentials f
             expect(nonExistentUser.count).toBe(0);
           }
         ),
-        { numRuns: 100 }
-      );
-    },
-    120_000
-  );
-});
-
-/**
- * Feature: role-based-auth, Property 11: Unverified email blocks login
- *
- * For any newly registered user who has not verified their email, attempting
- * to log in SHALL return an error indicating the email is not verified, and
- * SHALL NOT create a session.
- *
- * **Validates: Requirements 12.2, 12.8**
- */
-describe("Feature: role-based-auth, Property 11: Unverified email blocks login", () => {
-  let sqlite: InstanceType<typeof Database>;
-  let auth: TestAuth;
-
-  beforeAll(() => {
-    sqlite = initDatabase();
-    auth = createTestAuthWithEmailVerification(sqlite);
-  });
-
-  afterAll(() => {
-    sqlite.close();
-  });
-
-  it(
-    "for any newly registered user who has not verified their email, login SHALL return an error and SHALL NOT create a session",
-    async () => {
-      let emailCounter = 0;
-
-      await fc.assert(
-        fc.asyncProperty(validNameArb, validPasswordArb, async (name, password) => {
-          const email = `prop11unverified${emailCounter++}@test.com`;
-
-          // Register the user (with requireEmailVerification: true)
-          const regResponse = await registerUser(auth, email, password, name);
-          expect(regResponse.status).toBe(200);
-
-          // Verify the user's email is NOT verified in the database
-          const dbUser = sqlite
-            .prepare('SELECT "emailVerified" FROM "user" WHERE email = ?')
-            .get(email) as { emailVerified: number } | undefined;
-          expect(dbUser).toBeDefined();
-          expect(dbUser!.emailVerified).toBeFalsy();
-
-          // Count sessions before login attempt
-          const sessionCountBefore = sqlite
-            .prepare(
-              'SELECT COUNT(*) as count FROM "session" WHERE userId = (SELECT id FROM "user" WHERE email = ?)'
-            )
-            .get(email) as { count: number };
-
-          // Attempt to login — should fail because email is not verified
-          const loginResponse = await loginUser(auth, email, password);
-          expect(loginResponse.status).not.toBe(200);
-
-          // Verify no NEW session was created after the failed login attempt
-          const sessionCountAfter = sqlite
-            .prepare(
-              'SELECT COUNT(*) as count FROM "session" WHERE userId = (SELECT id FROM "user" WHERE email = ?)'
-            )
-            .get(email) as { count: number };
-          expect(sessionCountAfter.count).toBe(sessionCountBefore.count);
-        }),
         { numRuns: 100 }
       );
     },

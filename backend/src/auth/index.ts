@@ -1,9 +1,8 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { admin, emailOTP } from "better-auth/plugins";
+import { admin } from "better-auth/plugins";
 import { expo } from "@better-auth/expo";
 import { drizzle } from "drizzle-orm/d1";
-import { sendEmail } from "./email";
 import * as schema from "../db/schema";
 import { generateUniqueUsername } from "../worker/utils/username-generator";
 
@@ -20,7 +19,7 @@ function isLocalDevelopmentHost(hostname: string): boolean {
   return /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
 }
 
-export function createAuth(env: Env, ctx?: ExecutionContext, requestUrl?: string) {
+export function createAuth(env: Env, _ctx?: ExecutionContext, requestUrl?: string) {
   const db = drizzle(env.DB, { schema });
 
   // Derive baseURL from the incoming request URL so Better Auth can
@@ -56,31 +55,13 @@ export function createAuth(env: Env, ctx?: ExecutionContext, requestUrl?: string
     }),
     emailAndPassword: {
       enabled: true,
-      requireEmailVerification: true,
+      requireEmailVerification: false,
     },
     plugins: [
       admin({
         defaultRole: "user",
       }),
       expo(),
-      emailOTP({
-        overrideDefaultEmailVerification: true,
-        async sendVerificationOTP({ email, otp, type }) {
-          if (type === "email-verification") {
-            const emailPromise = sendEmail({
-              to: email,
-              subject: "Your Harmoniq verification code",
-              html: `<p>Your verification code is: <strong>${otp}</strong></p><p>Enter this code in the app to verify your email.</p>`,
-              env,
-            });
-            if (ctx) {
-              ctx.waitUntil(emailPromise);
-            } else {
-              void emailPromise;
-            }
-          }
-        },
-      }),
     ],
     trustedOrigins: Array.from(trustedOrigins),
     user: {

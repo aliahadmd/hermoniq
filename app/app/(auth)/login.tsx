@@ -41,22 +41,8 @@ export default function LoginScreen() {
 
       if (result.error) {
         const errorMessage = result.error.message ?? 'Login failed. Please try again.';
-
-        if (
-          result.error.code === 'EMAIL_NOT_VERIFIED' ||
-          errorMessage.toLowerCase().includes('email is not verified') ||
-          errorMessage.toLowerCase().includes('verify your email')
-        ) {
-          router.replace({
-            pathname: '/(auth)/verify-email' as const,
-            params: { email: data.email.trim() },
-          } as never);
-          return;
-        }
-
         setError('root', { message: errorMessage });
       } else {
-        // Login succeeded — navigate to main app
         router.replace('/(tabs)/assistant' as never);
       }
     } catch {

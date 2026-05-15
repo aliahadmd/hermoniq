@@ -20,7 +20,7 @@ Run commands from this directory. The Cloudflare backend is a separate project i
 
 ```text
 app/
-  (auth)/                  Login, register, verify-email
+  (auth)/                  Login and register
   (tabs)/                  Main bottom tabs
   assistant/               AI chat and chat settings
   habits/                  Habit detail, create, edit

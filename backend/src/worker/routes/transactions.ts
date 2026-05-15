@@ -102,23 +102,19 @@ transactionRoutes.post("/", async (c) => {
     }
   }
 
+  const [txn] = await db
+    .insert(transactions)
+    .values({ ...parsed, date: normalizedDate, categoryId: parsed.categoryId ?? null, userId })
+    .returning();
+
   const balanceDelta = parsed.type === "income" ? parsed.amount : -parsed.amount;
-  const [txn] = await db.transaction(async (tx) => {
-    const [createdTxn] = await tx
-      .insert(transactions)
-      .values({ ...parsed, date: normalizedDate, categoryId: parsed.categoryId ?? null, userId })
-      .returning();
-
-    await tx
-      .update(accounts)
-      .set({
-        balance: sql`${accounts.balance} + ${balanceDelta}`,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(accounts.id, parsed.accountId), eq(accounts.userId, userId)));
-
-    return [createdTxn];
-  });
+  await db
+    .update(accounts)
+    .set({
+      balance: sql`${accounts.balance} + ${balanceDelta}`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(accounts.id, parsed.accountId), eq(accounts.userId, userId)));
 
   return c.json(
     {
@@ -136,35 +132,27 @@ transactionRoutes.delete("/:id", async (c) => {
   const id = c.req.param("id");
   const db = createDb(c.env.DB);
 
-  const deletedTxn = await db.transaction(async (tx) => {
-    const [txn] = await tx
-      .select()
-      .from(transactions)
-      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
+  const [txn] = await db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
 
-    if (!txn) {
-      return null;
-    }
-
-    await tx
-      .delete(transactions)
-      .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
-
-    const reverseDelta = txn.type === "income" ? -txn.amount : txn.amount;
-    await tx
-      .update(accounts)
-      .set({
-        balance: sql`${accounts.balance} + ${reverseDelta}`,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(accounts.id, txn.accountId), eq(accounts.userId, userId)));
-
-    return txn.id;
-  });
-
-  if (!deletedTxn) {
+  if (!txn) {
     return c.json({ error: "Transaction not found" }, 404);
   }
+
+  await db
+    .delete(transactions)
+    .where(and(eq(transactions.id, id), eq(transactions.userId, userId)));
+
+  const reverseDelta = txn.type === "income" ? -txn.amount : txn.amount;
+  await db
+    .update(accounts)
+    .set({
+      balance: sql`${accounts.balance} + ${reverseDelta}`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(accounts.id, txn.accountId), eq(accounts.userId, userId)));
 
   return c.json({ success: true });
 });

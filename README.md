@@ -31,7 +31,7 @@ app/
 backend/
   src/worker/          Hono API, middleware, routes, AI agent, utilities
   src/db/              Drizzle schema and SQL migrations
-  src/auth/            Better Auth configuration and email helpers
+  src/auth/            Better Auth configuration
   src/react-app/       Admin dashboard SPA
   src/__tests__/       Vitest tests and test helpers
 ```
@@ -79,6 +79,7 @@ npm run dev        # Start Cloudflare/Vite dev server
 npm run build      # TypeScript build and Vite production build
 npm run test       # Run Vitest suite
 npm run lint       # Run ESLint
+npm run seed       # Seed local demo/portfolio data
 npm run cf-typegen # Regenerate Cloudflare Worker binding types
 npm run deploy     # Deploy with Wrangler
 ```
@@ -102,11 +103,12 @@ Backend configuration lives in `backend/wrangler.json` and Cloudflare secrets. I
 - Durable Object: `AI_CHAT_SESSION`
 - Vectorize: `CHAT_MEMORY_INDEX`
 - R2 bucket: `AI_CHAT_MEDIA_BUCKET`
-- Email secrets: `RESEND_API_KEY`, `EMAIL_FROM`
 
 Mobile configuration uses `EXPO_PUBLIC_API_URL` for local development. Production builds fall back to the deployed Cloudflare Worker URL defined in `app/lib/base-url.ts`.
 
 Do not commit production secrets. Use Wrangler secrets for deployed values.
+
+Email verification is intentionally disabled for portfolio/demo use. Sign-up creates a usable local account immediately.
 
 ## AI Assistant
 
@@ -137,6 +139,18 @@ npx expo start --clear
 watchman watch-del "$(pwd)" || true
 watchman watch-project "$(pwd)" || true
 ```
+
+## Demo Data
+
+The backend includes a portfolio seed script for local demo data:
+
+```bash
+cd backend
+npm run dev
+npm run seed
+```
+
+The seed creates an admin demo account, profile, money accounts/categories/transactions/budgets, habit logs, notes, planner events, and AI chat presets. Defaults can be overridden with `SEED_ADMIN_EMAIL`, `SEED_ADMIN_PASSWORD`, `SEED_ADMIN_NAME`, `SEED_ADMIN_USERNAME`, `SEED_BASE_URL`, and `SEED_DB_NAME`.
 
 ## More Documentation
 

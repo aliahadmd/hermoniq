@@ -227,36 +227,32 @@ async function executeMoneyCreateTransaction(
     }
   }
 
+  const [created] = await db
+    .insert(transactions)
+    .values({
+      amount: parsed.amount,
+      type: parsed.type,
+      date: parsed.date,
+      description: parsed.description,
+      categoryId: parsed.categoryId ?? null,
+      accountId: parsed.accountId,
+      userId,
+    })
+    .returning({
+      id: transactions.id,
+      amount: transactions.amount,
+      type: transactions.type,
+      date: transactions.date,
+    });
+
   const delta = parsed.type === "income" ? parsed.amount : -parsed.amount;
-  const [created] = await db.transaction(async (tx) => {
-    const [txn] = await tx
-      .insert(transactions)
-      .values({
-        amount: parsed.amount,
-        type: parsed.type,
-        date: parsed.date,
-        description: parsed.description,
-        categoryId: parsed.categoryId ?? null,
-        accountId: parsed.accountId,
-        userId,
-      })
-      .returning({
-        id: transactions.id,
-        amount: transactions.amount,
-        type: transactions.type,
-        date: transactions.date,
-      });
-
-    await tx
-      .update(accounts)
-      .set({
-        balance: sql`${accounts.balance} + ${delta}`,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(accounts.id, parsed.accountId), eq(accounts.userId, userId)));
-
-    return [txn];
-  });
+  await db
+    .update(accounts)
+    .set({
+      balance: sql`${accounts.balance} + ${delta}`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(accounts.id, parsed.accountId), eq(accounts.userId, userId)));
 
   return { transaction: created };
 }
@@ -267,40 +263,34 @@ async function executeMoneyDeleteTransaction(
   payload: unknown,
 ) {
   const parsed = moneyDeletePayloadSchema.parse(payload);
-  const deleted = await db.transaction(async (tx) => {
-    const [txn] = await tx
-      .select({
-        id: transactions.id,
-        type: transactions.type,
-        amount: transactions.amount,
-        accountId: transactions.accountId,
-      })
-      .from(transactions)
-      .where(and(eq(transactions.id, parsed.transactionId), eq(transactions.userId, userId)));
+  const [txn] = await db
+    .select({
+      id: transactions.id,
+      type: transactions.type,
+      amount: transactions.amount,
+      accountId: transactions.accountId,
+    })
+    .from(transactions)
+    .where(and(eq(transactions.id, parsed.transactionId), eq(transactions.userId, userId)));
 
-    if (!txn) return null;
-
-    await tx
-      .delete(transactions)
-      .where(and(eq(transactions.id, parsed.transactionId), eq(transactions.userId, userId)));
-
-    const reverseDelta = txn.type === "income" ? -txn.amount : txn.amount;
-    await tx
-      .update(accounts)
-      .set({
-        balance: sql`${accounts.balance} + ${reverseDelta}`,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(accounts.id, txn.accountId), eq(accounts.userId, userId)));
-
-    return txn;
-  });
-
-  if (!deleted) {
+  if (!txn) {
     throw new ActionExecutionError("Transaction not found", 404);
   }
 
-  return { transaction: deleted, deleted: true };
+  await db
+    .delete(transactions)
+    .where(and(eq(transactions.id, parsed.transactionId), eq(transactions.userId, userId)));
+
+  const reverseDelta = txn.type === "income" ? -txn.amount : txn.amount;
+  await db
+    .update(accounts)
+    .set({
+      balance: sql`${accounts.balance} + ${reverseDelta}`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(accounts.id, txn.accountId), eq(accounts.userId, userId)));
+
+  return { transaction: txn, deleted: true };
 }
 
 async function executeHabitCreate(

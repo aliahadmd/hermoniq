@@ -42,28 +42,11 @@ export default function RegisterScreen() {
 
       if (result.error) {
         const msg = result.error.message ?? '';
-        // If the error is about email verification, that means the user was
-        // created successfully but needs to verify — navigate to OTP screen.
-        if (
-          result.error.code === 'EMAIL_NOT_VERIFIED' ||
-          msg.toLowerCase().includes('email is not verified') ||
-          msg.toLowerCase().includes('verify your email')
-        ) {
-          router.replace({
-            pathname: '/(auth)/verify-email' as const,
-            params: { email: data.email.trim(), password: data.password },
-          } as never);
-          return;
-        }
         setError('root', {
           message: msg || 'Registration failed. Please try again.',
         });
       } else {
-        // Registration succeeded — user needs to verify email via OTP
-        router.replace({
-          pathname: '/(auth)/verify-email' as const,
-          params: { email: data.email.trim(), password: data.password },
-        } as never);
+        router.replace('/(tabs)/assistant' as never);
       }
     } catch {
       setError('root', { message: 'Unable to connect to server. Please try again.' });
